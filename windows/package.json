@@ -1,0 +1,21 @@
+{
+  "name": "pixel-aquarium",
+  "version": "1.0.0",
+  "description": "Akuarium pixel art 16-bit yang melayang di desktop",
+  "main": "main.js",
+  "scripts": {
+    "sync": "node sync.js",
+    "start": "node sync.js && electron .",
+    "build": "node sync.js && electron-builder --win portable"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "local.pixelaquarium",
+    "productName": "PixelAquarium",
+    "files": ["main.js", "preload.js", "aquarium.html", "assets/**"],
+    "win": { "target": "portable", "icon": "assets/icon.png" }
+  }
+}

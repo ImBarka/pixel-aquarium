@@ -1,0 +1,391 @@
+<!doctype html>
+<meta charset="utf-8">
+<style>
+  html, body { margin: 0; width: 100%; height: 100%; background: transparent; overflow: hidden; }
+  canvas { display: block; width: 100vw; height: 100vh; image-rendering: pixelated; }
+</style>
+<canvas id="c" width="128" height="80"></canvas>
+<script>
+window.addEventListener('error', e => { window.__err = e.message + ' @' + e.lineno; });
+</script>
+<script>
+// PIXEL AQUARIUM — 128x80 logical pixels, di-scale oleh aplikasi (2x/3x/4x).
+const W = 128, H = 80;
+const cv = document.getElementById('c');
+const ctx = cv.getContext('2d');
+ctx.imageSmoothingEnabled = false;
+
+const rnd = (a, b) => a + Math.random() * (b - a);
+const hash = (x, y) => (((x * 73856093) ^ (y * 19349663)) >>> 0) % 997;
+const BAYER = [[0,8,2,10],[12,4,14,6],[3,11,1,9],[15,7,13,5]].map(r => r.map(v => (v + 0.5) / 16));
+
+// ---------- sprite util ----------
+function mk(rows, map) {
+  const w = Math.max(...rows.map(r => r.length)), h = rows.length;
+  const make = () => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
+  const n = make(), f = make();
+  const a = n.getContext('2d'), b = f.getContext('2d');
+  rows.forEach((row, y) => [...row].forEach((ch, x) => {
+    const col = map[ch]; if (!col) return;
+    a.fillStyle = col; a.fillRect(x, y, 1, 1);
+    b.fillStyle = col; b.fillRect(w - 1 - x, y, 1, 1);
+  }));
+  return { n, f, w, h };
+}
+const draw = (s, x, y, dir = 1) => ctx.drawImage(dir >= 0 ? s.n : s.f, Math.round(x), Math.round(y));
+
+// ---------- sprites ----------
+const fishRows = [
+  ["....DDD....", "D..BBBBBB..", "DDBBBBBBEPB", "DDLLBBBBBBB", "D..LLLLLL.."],
+  ["....DDD....", "...BBBBBB..", ".DBBBBBBEPB", ".DLLBBBBBBB", "...LLLLLL.."],
+];
+const fishMap = (B, L, D) => ({ B, L, D, E: '#ffffff', P: '#1a1c2c' });
+const FISH = {
+  orange: fishRows.map(r => mk(r, fishMap('#ff8a1f', '#ffd08a', '#c4491c'))),
+  tang:   fishRows.map(r => mk(r, fishMap('#3b6cff', '#9dbcff', '#ffd93b'))),
+  pink:   fishRows.map(r => mk(r, fishMap('#ff77a8', '#ffd0e0', '#b13e6e'))),
+};
+const tinyRows = [
+  ["..BBB.", "D.BBPB", "DDBBBB", "..LLL."],
+  ["..BBB.", "..BBPB", ".DBBBB", "..LLL."],
+];
+const TINY = tinyRows.map(r => mk(r, { B: '#5ee8ff', L: '#d4f9ff', D: '#2a9fc0', P: '#10213a' }));
+
+const jellyMap = { C: '#ff8fd0', W: '#ffffff', T: '#ffc2e6' };
+const JELLY = [
+  mk(["..CCCCC..", ".CCWCCCC.", "CCWCCCCCC", "CCCCCCCCC", ".T.T.T.T.", ".T.T.T.T.", "T.T.T.T.T", ".T.T.T.T."], jellyMap),
+  mk(["...CCC...", "..CWCCC..", ".CWCCCCC.", ".CCCCCCC.", "..T.T.T..", "..T.T.T..", "...T.T...", "..T.T.T.."], jellyMap),
+];
+
+const crabMap = { R: '#ee4b2b', D: '#a52a16', W: '#ffffff', P: '#10213a' };
+const CRAB = [
+  mk(["W.......W", "RR.....RR", ".RRRRRRR.", "RRPRRRPRR", "R.D...D.R"], crabMap),
+  mk(["W.......W", "RR.....RR", ".RRRRRRR.", "RRPRRRPRR", ".R.D.D.R."], crabMap),
+];
+
+const chestMap = { K: '#3d2310', B: '#8a5a2b', Y: '#ffd23f', a: '#fff08a' };
+const CHEST = [
+  mk([".KKKKKKKK.", "KBBBBBBBBK", "KBBBBBBBBK", "KKKKYYKKKK", "KBBBYYBBBK", "KBBBBBBBBK", "KKKKKKKKKK"], chestMap),
+  mk(["KKKKKKKK..", "KBBBBBBK..", "KKKKKKKKKK", "KYaYaYaYYK", "KBBBBBBBBK", "KBBBBBBBBK", "KKKKKKKKKK"], chestMap),
+];
+
+const coralRows = ["...X.X...", "...X.X...", ".X.XXX.X.", ".XXXXXXX.", "..XXXXX..", "...XXX...", "...XXX..."];
+const coralSmall = ["..X.X..", "X.XXX.X", "XXXXXXX", ".XXXXX.", "..XXX.."];
+const CORAL_PINK = mk(coralRows.map(r => r.replace(/X/g, 'P')), { P: '#ff5fa2' });
+const CORAL_PURP = mk(coralRows.map(r => r.replace(/X/g, 'P')), { P: '#a56bff' });
+const CORAL_ORNG = mk(coralSmall.map(r => r.replace(/X/g, 'P')), { P: '#ffa53a' });
+const ROCK = mk([".GGGG...", "GGHGGGG.", "GGGGGGGG"], { G: '#5b6b86', H: '#8aa0c0' });
+const STAR = mk(["..S..", "SSSSS", ".SSS.", ".S.S."], { S: '#ff9d2f' });
+
+const sharkMap = { G: '#6f86a6', D: '#4d6283', W: '#dbe6f2', P: '#10213a' };
+const SHARK = [
+  mk(["D.........DD............",
+      "DD.......DDDD...........",
+      ".DD.....GGGGGGGGGG......",
+      "..DDGGGGGGGGGGGGGGGG....",
+      "...DGGGGGGGGGGGGGGGGGP..",
+      "..DDWWWWGGGGGGGGGGGGGGG.",
+      ".DD...WWWWWWWWWWWWWWWW..",
+      "D......WWWWWWDDWWWW....."], sharkMap),
+  mk([".........DD.............",
+      "........DDDD............",
+      "D......GGGGGGGGGG.......",
+      "DD.DDGGGGGGGGGGGGGGG....",
+      ".DDDGGGGGGGGGGGGGGGGGP..",
+      "..DDWWWWGGGGGGGGGGGGGGG.",
+      "...D..WWWWWWWWWWWWWWWW..",
+      "......WWWWWWDDWWWW....."], sharkMap),
+];
+const turtleMap = { D: '#2c6b3a', G: '#3fae5a', L: '#8fe08a', K: '#9bb55a', P: '#10213a' };
+const TURTLE = [
+  mk(["....DDDDDD.....", "..DDGGLLGGDD...", ".DGGLGGGGLGDKKK", "DDGGGLLLLGGDKPK", ".DDDDDDDDDDD...", "..KK......KK...", ".KK........KK.."], turtleMap),
+  mk(["....DDDDDD.....", "..DDGGLLGGDD...", ".DGGLGGGGLGDKKK", "DDGGGLLLLGGDKPK", ".DDDDDDDDDDD...", "...KK....KK....", "....KK..KK....."], turtleMap),
+];
+
+// ---------- air & pasir (prerender) ----------
+const toRGB = list => list.map(h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16)));
+const LEVELS_DAY = toRGB(['#46b0ec', '#2f8fd2', '#2270b0', '#18548f', '#103a6b']);
+const LEVELS_NIGHT = toRGB(['#1a3b7c', '#132d62', '#0d2149', '#081636', '#050c22']);
+const sandTop = x => 66 + Math.round(Math.sin(x * 0.16) * 1.2 + Math.sin(x * 0.06 + 1) * 1.6);
+
+function buildBG(LEVELS, rays) {
+  const bg = document.createElement('canvas'); bg.width = W; bg.height = H;
+  const b = bg.getContext('2d');
+  const img = b.createImageData(W, H);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const f = (y / (H - 1)) * (LEVELS.length - 1);
+    let i = Math.floor(f), fr = f - i;
+    if (i < LEVELS.length - 1 && fr > BAYER[y & 3][x & 3]) i++;
+    // sinar cahaya bertitik (dither)
+    const ray = ((x + y * 0.55) % 26) < 7;
+    if (rays && ray && y < 54 && BAYER[(y + 1) & 3][(x + 2) & 3] < (1 - y / 54) * 0.5) i = Math.max(0, i - 1);
+    const c = LEVELS[i], k = (y * W + x) * 4;
+    img.data[k] = c[0]; img.data[k + 1] = c[1]; img.data[k + 2] = c[2]; img.data[k + 3] = 255;
+  }
+  b.putImageData(img, 0, 0);
+  // pasir
+  for (let x = 0; x < W; x++) {
+    const top = sandTop(x);
+    for (let y = top; y < H; y++) {
+      const d = y - top;
+      let col = d === 0 ? '#f6dd9a' : '#e8c27a';
+      if (d > 5 && BAYER[y & 3][x & 3] < Math.min(1, (d - 5) / 9)) col = '#d4a85e';
+      if (d > 11 && BAYER[(y + 2) & 3][(x + 1) & 3] < (d - 11) / 4) col = '#b88a44';
+      if (hash(x, y) % 13 === 0 && d > 1) col = '#d9b36a';
+      b.fillStyle = col; b.fillRect(x, y, 1, 1);
+    }
+  }
+  // dekorasi
+  const put = (s, x, over = 0) => b.drawImage(s.n, x, sandTop(x + (s.w >> 1)) - s.h + over);
+  put(ROCK, 112, 1); put(CORAL_PINK, 34, 2); put(CORAL_PURP, 100, 2); put(CORAL_ORNG, 48, 2);
+  put(STAR, 88, 0); put(ROCK, 4, 1);
+  return bg;
+}
+const bgDay = buildBG(LEVELS_DAY, true), bgNight = buildBG(LEVELS_NIGHT, false);
+
+// ---------- bingkai & mask sudut ----------
+const maskC = document.createElement('canvas'); maskC.width = W; maskC.height = H;
+const frameC = document.createElement('canvas'); frameC.width = W; frameC.height = H;
+(function buildFrame() {
+  const R = 4;
+  const inside = (x, y) => {
+    if (x < 0 || y < 0 || x >= W || y >= H) return false;
+    const cx = x < R ? R - 0.5 - x : x > W - 1 - R ? x - (W - R - 0.5) : 0;
+    const cy = y < R ? R - 0.5 - y : y > H - 1 - R ? y - (H - R - 0.5) : 0;
+    return cx * cx + cy * cy <= (R - 0.2) * (R - 0.2) + (cx > 0 && cy > 0 ? 0 : 1e9);
+  };
+  const m = maskC.getContext('2d'), f = frameC.getContext('2d');
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    if (!inside(x, y)) continue;
+    m.fillStyle = '#000'; m.fillRect(x, y, 1, 1);
+    const edge = !inside(x - 1, y) || !inside(x + 1, y) || !inside(x, y - 1) || !inside(x, y + 1);
+    if (edge) { f.fillStyle = '#0a1430'; f.fillRect(x, y, 1, 1); continue; }
+    const e2 = !inside(x - 2, y) || !inside(x + 2, y) || !inside(x, y - 2) || !inside(x, y + 2) ||
+               !inside(x - 1, y - 1) || !inside(x + 1, y + 1) || !inside(x - 1, y + 1) || !inside(x + 1, y - 1);
+    if (e2) { f.fillStyle = (x < W / 2 && y < H / 2) || (x < W / 2 !== y < H / 2 && (x + y) < W * 0.6) ? '#8fd8ff' : '#0c2f5c'; f.fillRect(x, y, 1, 1); }
+  }
+})();
+
+// ---------- waktu: siang / senja / malam ----------
+let cycleMode = 'real';
+let fastStart = new Date().getHours() + new Date().getMinutes() / 60;
+function hourNow() {
+  if (cycleMode === 'day') return 12;
+  if (cycleMode === 'night') return 0;
+  if (cycleMode === 'fast') return (fastStart + performance.now() / 1000 / 240 * 24) % 24;   // 1 hari = 4 menit
+  const d = new Date(); return d.getHours() + d.getMinutes() / 60 + d.getSeconds() / 3600;
+}
+const nightFactor = h => (h >= 19 || h < 5) ? 1 : h < 7 ? 1 - (h - 5) / 2 : h >= 17 ? (h - 17) / 2 : 0;
+const warmFactor = h => Math.max(0, 1 - Math.abs(h - 18) / 1.2, 1 - Math.abs(h - 6) / 1.2);
+window.setCycle = m => { cycleMode = m; if (m === 'fast') { const d = new Date(); fastStart = d.getHours() + d.getMinutes() / 60; } };
+
+// ---------- entities ----------
+const bubbles = [], foods = [];
+function bubble(x, y, big) {
+  bubbles.push({ x0: x, y, v: rnd(9, 20), ph: rnd(0, 6.28), big: big ?? Math.random() < 0.35 });
+}
+const bigFish = [
+  { spr: FISH.orange, x: 30, y0: 26, fy: 26, dir: 1, sp: 11, ph: 0.3 },
+  { spr: FISH.tang,   x: 90, y0: 40, fy: 40, dir: -1, sp: 8, ph: 2.0 },
+  { spr: FISH.pink,   x: 60, y0: 52, fy: 52, dir: 1, sp: 6, ph: 4.2 },
+];
+const crab = { x: 70, dir: 1, wait: 0, walkLeft: 3 };
+const chest = { x: 70, open: false, timer: 4 };
+const kelps = [10, 16, 54, 59, 96, 122].map(x => ({ x, h: Math.round(rnd(16, 30)), ph: rnd(0, 6) }));
+const glints = Array.from({ length: 40 }, () => ({ x: Math.floor(rnd(4, W - 4)), y: Math.floor(rnd(8, 60)), ph: rnd(0, 6.28) }));
+
+let visitor = null, visitTimer = 14;
+function startVisitor(kind) {
+  if (visitor) return;
+  kind = kind || (Math.random() < 0.5 ? 'shark' : 'turtle');
+  const dir = Math.random() < 0.5 ? 1 : -1, spr = kind === 'shark' ? SHARK : TURTLE;
+  visitor = { kind, dir, spr, x: dir > 0 ? -spr[0].w - 2 : W + 2, y: kind === 'shark' ? rnd(14, 32) : rnd(22, 46), sp: kind === 'shark' ? 15 : 7, ph: rnd(0, 6) };
+}
+function updateVisitor(dt) {
+  if (!visitor) { visitTimer -= dt; if (visitTimer <= 0) startVisitor(); return; }
+  visitor.x += visitor.dir * visitor.sp * dt;
+  if ((visitor.dir > 0 && visitor.x > W + 4) || (visitor.dir < 0 && visitor.x < -visitor.spr[0].w - 4)) { visitor = null; visitTimer = rnd(40, 80); }
+}
+window.spawn = startVisitor;
+
+window.feed = () => {
+  for (let i = 0; i < 5; i++) if (foods.length < 14) foods.push({ x: rnd(16, W - 16), y: 5 + rnd(0, 3), age: 0 });
+};
+window.setPaused = p => { paused = p; if (!p) last = performance.now(); };
+
+// ---------- update ----------
+function update(dt, t) {
+  // ikan besar
+  bigFish.forEach(f => {
+    let tx = null, ty = f.y0 + Math.sin(t * 0.8 + f.ph) * 6, sp = f.sp;
+    if (foods.length) {
+      let best = null, bd = 1e9;
+      foods.forEach(fd => { const d = Math.abs(fd.x - f.x) + Math.abs(fd.y - f.fy); if (d < bd) { bd = d; best = fd; } });
+      if (best) { tx = best.x; ty = best.y; sp = f.sp * 2.2; }
+    }
+    let flee = false;
+    if (visitor && visitor.kind === 'shark') {
+      const cxv = visitor.x + visitor.spr[0].w / 2;
+      if (Math.abs(cxv - f.x) < 38) { f.dir = f.x >= cxv ? 1 : -1; sp = f.sp * 2.4; flee = true; tx = null; }
+    }
+    if (tx !== null) { f.dir = tx > f.x + 6 ? 1 : tx < f.x + 6 ? -1 : f.dir; }
+    else if (!flee) {
+      if (f.x > W - f.spr[0].w - 5) f.dir = -1;
+      if (f.x < 5) f.dir = 1;
+      if (Math.random() < dt * 0.04) f.dir *= -1;
+    }
+    f.x += f.dir * sp * dt;
+    f.x = Math.max(2, Math.min(W - f.spr[0].w - 2, f.x));
+    f.fy += (ty - f.fy) * Math.min(1, dt * 2.5);
+  });
+  // makanan
+  for (let i = foods.length - 1; i >= 0; i--) {
+    const fd = foods[i]; fd.age += dt;
+    fd.y += 7 * dt; fd.x += Math.sin(t * 2 + i) * 0.1;
+    const ground = sandTop(Math.round(fd.x)) - 1;
+    if (fd.y > ground) fd.y = ground;
+    if (fd.age > 25) { foods.splice(i, 1); continue; }
+    for (const f of bigFish) {
+      const mx = f.x + (f.dir > 0 ? f.spr[0].w : 0), my = f.fy + 2;
+      if (Math.abs(mx - fd.x) < 5 && Math.abs(my - fd.y) < 5) {
+        foods.splice(i, 1); bubble(mx, my, false); bubble(mx + 1, my - 2, true); break;
+      }
+    }
+  }
+  // kepiting
+  if (crab.wait > 0) crab.wait -= dt;
+  else {
+    crab.x += crab.dir * 6 * dt; crab.walkLeft -= dt;
+    if (crab.x > W - 16) crab.dir = -1;
+    if (crab.x < 8) crab.dir = 1;
+    if (crab.walkLeft <= 0) { crab.wait = rnd(1, 2.5); crab.walkLeft = rnd(2, 5); if (Math.random() < 0.5) crab.dir *= -1; }
+  }
+  // peti
+  chest.timer -= dt;
+  if (chest.timer <= 0) { chest.open = !chest.open; chest.timer = chest.open ? 2.6 : rnd(7, 12); }
+  if (chest.open && Math.random() < dt * 5) bubble(chest.x + rnd(2, 7), sandTop(chest.x + 5) - CHEST[0].h, Math.random() < 0.5);
+  if (Math.random() < dt * 0.6) { const kx = kelps[(Math.random() * kelps.length) | 0].x; bubble(kx, sandTop(kx) - 2); }
+  // gelembung
+  for (let i = bubbles.length - 1; i >= 0; i--) {
+    const b = bubbles[i]; b.y -= b.v * dt;
+    if (b.y < 5) bubbles.splice(i, 1);
+  }
+}
+
+// ---------- render ----------
+const GREEN_A = '#32d17a', GREEN_B = '#1f9a58';
+function render(t) {
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.clearRect(0, 0, W, H);
+  const hr = hourNow(), nF = nightFactor(hr), wF = warmFactor(hr);
+  ctx.drawImage(bgDay, 0, 0);
+  if (nF > 0.01) { ctx.globalAlpha = nF; ctx.drawImage(bgNight, 0, 0); ctx.globalAlpha = 1; }
+
+  // kilau
+  glints.forEach((g, i) => { if (i < 14 && Math.sin(t * 1.3 + g.ph) > 0.92) { ctx.fillStyle = '#e8fbff'; ctx.fillRect(g.x, g.y, 1, 1); } });
+
+  // kelp
+  kelps.forEach(k => {
+    const by = sandTop(k.x) + 1;
+    for (let j = 0; j < k.h; j++) {
+      const off = Math.round(Math.sin(t * 1.2 + j * 0.16 + k.ph) * (j / k.h) * 3.2);
+      ctx.fillStyle = (j >> 1) % 2 ? GREEN_A : GREEN_B;
+      ctx.fillRect(k.x + off, by - j, 2, 1);
+      if (j % 7 === 4) { ctx.fillStyle = GREEN_A; ctx.fillRect(k.x + off + (j % 14 < 7 ? -1 : 2), by - j, 1, 1); }
+    }
+  });
+
+  // hiu (di belakang ikan lain)
+  if (visitor && visitor.kind === 'shark') draw(visitor.spr[Math.floor(t * 4) % 2], visitor.x, visitor.y + Math.sin(t * 0.7 + visitor.ph) * 2, visitor.dir);
+
+  // peti
+  draw(CHEST[chest.open ? 1 : 0], chest.x, sandTop(chest.x + 5) - CHEST[0].h + 1);
+  if (chest.open && Math.floor(t * 6) % 2) { ctx.fillStyle = '#ffffff'; ctx.fillRect(chest.x + 3, sandTop(chest.x + 5) - 6, 1, 1); }
+
+  // kepiting
+  const cf = crab.wait > 0 ? 0 : Math.floor(t * 6) % 2;
+  draw(CRAB[cf], crab.x, sandTop(Math.round(crab.x) + 4) - CRAB[0].h + 2, crab.dir);
+
+  // kawanan ikan kecil
+  for (let i = 0; i < 6; i++) {
+    const tt = t - i * 0.32;
+    const x = 64 + Math.sin(tt * 0.33) * 40 + (i % 2) * 2;
+    const y = 34 + Math.sin(tt * 0.52) * 11 + (i % 3) * 3;
+    const dir = Math.cos(tt * 0.33) >= 0 ? 1 : -1;
+    draw(TINY[Math.floor(t * 7 + i) % 2], x, y, dir);
+  }
+
+  // ubur-ubur
+  const jf = Math.floor(t * 2.2) % 2;
+  const jx = 102 + Math.sin(t * 0.21) * 8, jy = 20 + Math.sin(t * 0.38) * 12 + (jf ? -1 : 0);
+  draw(JELLY[jf], jx, jy);
+
+  // ikan besar
+  bigFish.forEach(f => draw(f.spr[Math.floor(t * 5 + f.ph) % 2], f.x, f.fy, f.dir));
+
+  // penyu (di depan)
+  if (visitor && visitor.kind === 'turtle') draw(visitor.spr[Math.floor(t * 3) % 2], visitor.x, visitor.y + Math.sin(t * 0.9 + visitor.ph) * 3, visitor.dir);
+
+  // makanan
+  ctx.fillStyle = '#d98b45';
+  foods.forEach(fd => { ctx.fillRect(Math.round(fd.x), Math.round(fd.y), 2, 1); });
+
+  // gelembung
+  bubbles.forEach(b => {
+    const x = Math.round(b.x0 + Math.sin(b.y * 0.35 + b.ph) * 1.6), y = Math.round(b.y);
+    ctx.fillStyle = '#d9f4ff';
+    if (b.big) { ctx.fillRect(x, y, 2, 2); ctx.fillStyle = '#46b0ec'; ctx.fillRect(x, y + 1, 1, 1); ctx.fillStyle = '#ffffff'; ctx.fillRect(x, y, 1, 1); }
+    else ctx.fillRect(x, y, 1, 1);
+  });
+
+  // permukaan air
+  for (let x = 0; x < W; x++) {
+    const y = 3 + Math.round(Math.sin(x * 0.28 + t * 2.0));
+    ctx.fillStyle = '#d9f4ff'; ctx.fillRect(x, y, 1, 1);
+    ctx.fillStyle = '#8fd8ff'; ctx.fillRect(x, y - 1, 1, 1);
+  }
+
+  // ---- malam & senja ----
+  if (nF > 0.01) {
+    ctx.globalCompositeOperation = 'source-atop';
+    ctx.fillStyle = `rgba(6,12,48,${0.32 * nF})`; ctx.fillRect(0, 0, W, H);
+    ctx.globalCompositeOperation = 'source-over';
+    // ubur-ubur berpendar (halo dither)
+    const cx = Math.round(jx + 4.5), cy = Math.round(jy + 4), RR = 13;
+    ctx.fillStyle = '#ff8fd0'; ctx.globalAlpha = 0.5;
+    for (let dy = -RR; dy <= RR; dy++) for (let dx = -RR; dx <= RR; dx++) {
+      const d = Math.hypot(dx, dy); if (d >= RR) continue;
+      if (BAYER[(cy + dy) & 3][(cx + dx) & 3] < (1 - d / RR) * 0.5 * nF) ctx.fillRect(cx + dx, cy + dy, 1, 1);
+    }
+    ctx.globalAlpha = 1;
+    draw(JELLY[jf], jx, jy);
+    // plankton berpendar
+    ctx.fillStyle = '#8ffcff';
+    glints.forEach((g, i) => { if (i >= 14 && Math.sin(t * 0.9 + g.ph * 2) > 1 - 0.35 * nF) ctx.fillRect(g.x, g.y, 1, 1); });
+    glints.forEach((g, i) => { if (i < 14 && Math.sin(t * 1.3 + g.ph) > 0.92) ctx.fillRect(g.x, g.y, 1, 1); });
+  }
+  if (wF > 0.01) {   // cahaya senja oranye bertitik (dither)
+    for (let y = 0; y < 34; y++) for (let x = 0; x < W; x++) {
+      const p = (1 - y / 34) * 0.7 * wF;
+      if (BAYER[y & 3][x & 3] < p) { ctx.fillStyle = y < 8 ? '#ffc27a' : '#ff8f5a'; ctx.fillRect(x, y, 1, 1); }
+    }
+  }
+
+  // mask sudut + bingkai
+  ctx.globalCompositeOperation = 'destination-in'; ctx.drawImage(maskC, 0, 0);
+  ctx.globalCompositeOperation = 'source-over'; ctx.drawImage(frameC, 0, 0);
+}
+
+// ---------- loop ----------
+let paused = false, last = performance.now();
+const STEP = 1000 / 30;
+function tick(now) {
+  if (paused || now - last < STEP - 2) return;
+  const dt = Math.min(0.1, (now - last) / 1000); last = now;
+  const t = now / 1000;
+  update(dt, t); updateVisitor(dt); render(t);
+}
+function raf(now) { requestAnimationFrame(raf); tick(now); }
+requestAnimationFrame(raf);
+setInterval(() => tick(performance.now()), STEP);   // cadangan bila rAF dihentikan WebKit
+</script>
