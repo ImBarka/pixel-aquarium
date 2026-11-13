@@ -39,3 +39,6 @@ Menu ada di ikon system tray. Mode di belakang jendela belum tersedia di Windows
 - `aquarium.html`: seluruh animasi dan gambar
 - `main.swift`, `build.sh`: pembungkus macOS
 - `windows/`: pembungkus Windows (Electron)
+
+## Lisensi
+MIT, lihat [LICENSE](LICENSE).
